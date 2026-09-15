@@ -33,3 +33,6 @@ venv/
 # Misc
 *.tmp
 .cache/
+
+# Screenshot capture profile
+.tmp-screenshot-profile/
