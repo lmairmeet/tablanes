@@ -14,9 +14,10 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
   const pointer = { x: 0, y: 0 };
 
   board.addEventListener('pointerdown', onPointerDown);
+  board.addEventListener('lostpointercapture', cancel);
 
   function onPointerDown(e) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || drag) return;
     if (e.target.closest('button, a, input, textarea, .no-drag')) return;
 
     const laneHandle = e.target.closest('.lane-header');
@@ -39,14 +40,16 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
     pointer.x = e.clientX;
     pointer.y = e.clientY;
 
-    board.addEventListener('pointermove', onPointerMove);
-    board.addEventListener('pointerup', onPointerUp);
-    board.addEventListener('pointercancel', cancel);
+    addEventListener('pointermove', onPointerMove);
+    addEventListener('pointerup', onPointerUp);
+    addEventListener('pointercancel', cancel);
+    addEventListener('blur', cancel);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     addEventListener('keydown', onKeyDown, true);
   }
 
   function onPointerMove(e) {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pointerId) return;
     pointer.x = e.clientX;
     pointer.y = e.clientY;
 
@@ -128,8 +131,8 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
     flip(animated, () => parent.insertBefore(drag.el, before));
   }
 
-  function onPointerUp() {
-    if (!drag) return;
+  function onPointerUp(e) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
     if (!drag.active) return cleanup();
 
     const el = drag.el;
@@ -152,13 +155,17 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
       const sibling = el[dir];
       return sibling?.matches(selector) ? sibling.dataset.id : null;
     };
+    cleanup();
     if (type === 'card') {
       const laneId = el.closest('.lane').dataset.id;
       onCardMove(el.dataset.id, laneId, neighbour('previousElementSibling', '.card'), neighbour('nextElementSibling', '.card'));
     } else {
       onLaneMove(el.dataset.id, neighbour('previousElementSibling', '.lane'), neighbour('nextElementSibling', '.lane'));
     }
-    cleanup();
+  }
+
+  function onVisibilityChange() {
+    if (document.hidden) cancel();
   }
 
   function onKeyDown(e) {
@@ -171,7 +178,10 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
   function cancel() {
     if (!drag) return;
     if (drag.active) {
-      drag.origin.parent.insertBefore(drag.el, drag.origin.next);
+      if (drag.origin.parent.isConnected) {
+        const next = drag.origin.next;
+        drag.origin.parent.insertBefore(drag.el, next?.parentNode === drag.origin.parent ? next : null);
+      }
       drag.el.classList.remove('drag-source');
       drag.ghost?.remove();
       document.body.classList.remove('is-dragging', 'is-dragging-card', 'is-dragging-lane');
@@ -183,12 +193,15 @@ export function initDnd({ board, onCardMove, onLaneMove }) {
     if (frame) cancelAnimationFrame(frame);
     if (scrollFrame) cancelAnimationFrame(scrollFrame);
     frame = scrollFrame = null;
-    board.removeEventListener('pointermove', onPointerMove);
-    board.removeEventListener('pointerup', onPointerUp);
-    board.removeEventListener('pointercancel', cancel);
+    removeEventListener('pointermove', onPointerMove);
+    removeEventListener('pointerup', onPointerUp);
+    removeEventListener('pointercancel', cancel);
+    removeEventListener('blur', cancel);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     removeEventListener('keydown', onKeyDown, true);
-    if (drag && board.hasPointerCapture?.(drag.pointerId)) board.releasePointerCapture(drag.pointerId);
+    const pointerId = drag?.pointerId;
     drag = null;
+    if (pointerId != null && board.hasPointerCapture?.(pointerId)) board.releasePointerCapture(pointerId);
   }
 
   function startAutoScroll() {

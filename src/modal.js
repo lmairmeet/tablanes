@@ -1,8 +1,11 @@
+import { imageScope } from './images.js';
 import * as store from './store.js';
 import { h, icon, formatBytes, autosize, toast } from './ui.js';
 
 const dialog = document.getElementById('card-dialog');
-let objectUrls = [];
+let images = null;
+let savedTimer = null;
+let closeLightbox = null;
 let saveTimer = null;
 let session = null;
 
@@ -20,6 +23,7 @@ function normalizeUrl(input) {
 }
 
 export function openCard(cardId, { onChange, onDelete }) {
+  flushSave();
   session = { cardId, onChange, onDelete };
   render();
   if (!dialog.open) dialog.showModal();
@@ -32,8 +36,10 @@ function close() {
 
 dialog.addEventListener('close', () => {
   flushSave();
-  objectUrls.forEach(URL.revokeObjectURL);
-  objectUrls = [];
+  images?.dispose();
+  clearTimeout(savedTimer);
+  closeLightbox?.();
+  dialog.replaceChildren();
   session = null;
 });
 
@@ -69,11 +75,12 @@ function markSaved() {
   const label = dialog.querySelector('.saved');
   if (!label) return;
   label.textContent = 'Saved';
-  clearTimeout(label._timer);
-  label._timer = setTimeout(() => (label.textContent = ''), 1600);
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => (label.textContent = ''), 1600);
 }
 
 function refresh() {
+  flushSave();
   render();
   session.onChange();
 }
@@ -82,8 +89,9 @@ function render() {
   const card = store.getCard(session.cardId);
   if (!card) return dialog.close();
 
-  objectUrls.forEach(URL.revokeObjectURL);
-  objectUrls = [];
+  images?.dispose();
+  clearTimeout(savedTimer);
+  images = imageScope(store.getBlob);
 
   const title = h('textarea', {
     class: 'dialog-title',
@@ -200,12 +208,7 @@ function fileRow(file) {
     : h('span', { class: 'file-thumb doc' }, icon('file'));
 
   if (file.is_image) {
-    store.getBlob(file.id).then((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      objectUrls.push(url);
-      thumb.src = url;
-    });
+    images.observe(thumb, file.id);
   }
 
   return h('div', { class: 'file-row' }, [
@@ -243,11 +246,14 @@ async function download(file) {
 }
 
 async function lightbox(file) {
+  const owner = session;
   const blob = await store.getBlob(file.id);
-  if (!blob) return;
+  if (!blob || session !== owner || !dialog.open) return;
+  closeLightbox?.();
   const url = URL.createObjectURL(blob);
   const box = h('div', { class: 'lightbox' }, h('img', { src: url, alt: file.name }));
   const close = () => {
+    closeLightbox = null;
     box.remove();
     URL.revokeObjectURL(url);
     removeEventListener('keydown', onKey, true);
@@ -258,6 +264,7 @@ async function lightbox(file) {
       close();
     }
   };
+  closeLightbox = close;
   box.addEventListener('click', close);
   addEventListener('keydown', onKey, true);
   document.body.append(box);
@@ -277,9 +284,16 @@ function dropzone(cardId) {
     input,
   ]);
 
+  const owner = session;
   const add = async (files) => {
-    for (const file of files) await store.addAttachment(cardId, file);
-    refresh();
+    try {
+      for (const file of files) await store.addAttachment(cardId, file);
+      if (session === owner && dialog.open) refresh();
+      else owner.onChange();
+    } catch (err) {
+      console.error('TabLanes: failed to add attachment', err);
+      toast('Could not add one or more files.');
+    }
   };
 
   zone.addEventListener('dragover', (e) => {

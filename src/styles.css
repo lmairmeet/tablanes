@@ -184,6 +184,15 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.version-footer {
+  flex: none;
+  padding: 0 24px 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------------------------------------------------------------- board */
 .board {
   display: flex;

@@ -1,3 +1,4 @@
+import { imageScope } from './images.js';
 import { initDb } from './db.js';
 import * as store from './store.js';
 import { initDnd } from './dnd.js';
@@ -7,18 +8,31 @@ import { h, icon, menu, toast, highlight } from './ui.js';
 const board = document.getElementById('board');
 const searchInput = document.getElementById('search');
 const stats = document.getElementById('stats');
+const versionFooter = document.getElementById('version-footer');
+
+// Update this value whenever the extension code changes. Keeping it explicit
+// means the footer describes the shipped version, rather than page load time.
+const VERSION_UPDATED_AT = '2026-09-16T08:49:48+05:30';
+
+versionFooter.textContent = `Version updated on ${new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+}).format(new Date(VERSION_UPDATED_AT))}`;
 
 let query = '';
-let coverUrls = [];
+let covers = null;
+let lanesCache = null;
+let searchTimer = null;
 let composingIn = null; // lane id with an open card composer
 
 // ------------------------------------------------------------------ render
 
-function render() {
-  coverUrls.forEach(URL.revokeObjectURL);
-  coverUrls = [];
+function render(readStore = true) {
+  clearTimeout(searchTimer);
+  covers?.dispose();
+  covers = imageScope(store.getBlob);
 
-  const lanes = store.getBoard();
+  const lanes = readStore || !lanesCache ? (lanesCache = store.getBoard()) : lanesCache;
   const scroll = board.scrollLeft;
   const scrollTops = new Map(
     [...board.querySelectorAll('.lane')].map((l) => [l.dataset.id, l.querySelector('.lane-cards').scrollTop])
@@ -108,12 +122,7 @@ function renderCard(card) {
   ]);
 
   if (card.coverId) {
-    store.getBlob(card.coverId).then((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      coverUrls.push(url);
-      node.querySelector('.card-cover').src = url;
-    });
+    covers.observe(node.querySelector('.card-cover'), card.coverId);
   }
 
   node.addEventListener('click', () => openCardDialog(card.id));
@@ -264,7 +273,8 @@ function laneComposer() {
 
 searchInput.addEventListener('input', (e) => {
   query = e.target.value.trim();
-  render();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => render(false), 120);
 });
 
 searchInput.addEventListener('keydown', (e) => {
@@ -272,7 +282,7 @@ searchInput.addEventListener('keydown', (e) => {
   e.target.value = '';
   query = '';
   e.target.blur();
-  render();
+  render(false);
 });
 
 addEventListener('keydown', (e) => {

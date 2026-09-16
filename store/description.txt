@@ -1,0 +1,228 @@
+TabLanes turns the emptiest page in your browser into the most useful one.
+
+Every day you open dozens of new tabs. Each one greets you with a search box and
+a grid of sites you already know how to reach. That space is some of the most
+valuable real estate you own — you look at it more often than you look at almost
+any app on your machine — and it is doing nothing for you.
+
+TabLanes puts your board there. Open a tab, and your work is already on screen:
+lanes, cards, what is in progress, what is waiting. No app to switch to, no tab
+to hunt for, no login, no loading spinner. Just the board, instantly, every time.
+
+
+A BOARD, NOT AN APP
+
+TabLanes is deliberately one board. Not a workspace, not a set of projects, not
+a hierarchy of teams and boards and sub-boards you have to navigate before you
+can see anything. One board, on your new tab, for the work in front of you.
+
+That single decision is what makes it fast. There is nothing to choose when the
+page opens, because there is only one thing it can show you. The board is on
+screen before you have finished the keystroke that opened the tab.
+
+
+LANES
+
+Create as many lanes as your work needs. The classic three — To do, Doing, Done
+— are there when you first open it, and you can rename them to anything: Today
+and This Week and Someday; Inbox and Triaged and Shipped; one lane per client;
+one lane per repository; one lane per child's school week. Click a lane title to
+rename it in place. Drag a lane by its header to move it. Each lane shows a live
+count of the cards inside it.
+
+Lanes scroll horizontally, so a wide board is no problem, and each lane scrolls
+independently, so a deep lane never pushes the rest of the board around.
+
+
+CARDS
+
+Adding a card takes one click and one line of text. The composer stays open
+after you add, so you can empty your head into a lane in a single burst — type,
+Enter, type, Enter — instead of clicking "add" over and over. Escape closes it.
+
+Open a card and you get room to think:
+
+  • A title you can rewrite at any time
+  • A description that grows as you type, for the context that will not fit in a
+    title — the reason this matters, what "done" means, what you tried already
+  • Links, each saved with an optional label and shown with its source, so a
+    card can point at the pull request, the design file, the ticket and the
+    thread that produced it
+  • Files and images, dropped straight onto the card or chosen from a dialog
+
+Every change saves itself as you type. There is no save button, because there is
+nothing to remember to press.
+
+
+FILES AND IMAGES THAT ACTUALLY LIVE ON THE CARD
+
+Most lightweight task tools give you a text field and expect you to keep the
+real material somewhere else — a folder, a chat thread, a cloud drive. TabLanes
+keeps it on the card.
+
+Drop a screenshot onto a card and it becomes the card's cover, visible on the
+board at a glance. Click it to open it full size in a lightbox. Attach a PDF, a
+spreadsheet, a font file, a zip, a video — anything — and download it back out
+whenever you need it. Attachments are listed with their type and size, and a
+card shows small badges for how many links and files it carries, so you can see
+which cards are dense and which are still just a line of text.
+
+Because the files are stored locally, attaching a large image is instant. There
+is no upload, no progress bar, and no quiet compression of your screenshots.
+
+
+DRAG AND DROP THAT FEELS RIGHT
+
+Moving a card is the single most common thing you do on a board, so it got the
+most attention.
+
+Pick up a card and it follows your cursor immediately, at a slight tilt, while
+the cards around it glide out of the way to show you exactly where it will land.
+Drag toward the edge of the board and it scrolls, faster the closer you get, so
+crossing a wide board is one continuous motion rather than a series of drops and
+re-grabs. Lanes reorder the same way, by their headers.
+
+This is built on pointer events rather than the browser's built-in drag and
+drop, which is why it tracks your cursor exactly instead of lagging behind it,
+and why it behaves the same with a mouse, a trackpad, or a touchscreen.
+
+
+FIND ANYTHING, IMMEDIATELY
+
+Press the forward slash key from anywhere on the board and start typing. Lanes
+filter down to matching cards as you type, matched text is highlighted inside
+each card, every lane shows how many of its cards matched, and the header keeps
+a running count. Search looks at titles and descriptions both, so a card you
+wrote three weeks ago is findable by any detail you put in it.
+
+Escape clears the search and returns the whole board. Dragging still works while
+a filter is active, and cards land exactly where you drop them relative to the
+hidden ones — a small detail that takes real care to get right, and that you
+should never have to think about.
+
+
+UNDO, BECAUSE MISTAKES HAPPEN
+
+Delete a card and it goes, along with its links and its files — but a toast
+appears offering it back. One click restores the card exactly as it was, with
+every attachment intact.
+
+Delete a lane and the same applies: the lane and every card inside it come back
+in their original order, in their original position on the board. Nothing is
+destroyed the moment you click, and nothing asks you to confirm a decision you
+are entitled to reverse.
+
+
+BUILT TO DISAPPEAR
+
+TabLanes follows your system theme. Dark by default, with a light theme that
+takes over automatically when your machine is in light mode. Both were designed
+first rather than converted from each other.
+
+The interface is quiet on purpose. No sidebars, no ribbons, no onboarding
+checklist, no upsell banner, no badge asking you to invite your team, no bright
+empty states telling you to get started. A header with a search box, your lanes,
+and your cards. The board is the product.
+
+
+YOUR DATA IS A DATABASE ON YOUR COMPUTER
+
+TabLanes stores your board in SQLite — the actual database engine, compiled to
+WebAssembly and bundled inside the extension. Lanes, cards, links and
+attachments are real tables with real relationships: delete a lane and its cards
+go with it because the database enforces it, not because some code remembered
+to clean up.
+
+That database lives inside your browser profile on your own machine. Your
+attachments live beside it. Nothing is uploaded, because there is nowhere to
+upload it to. TabLanes has no server.
+
+It also has no account. You do not sign up, you do not sign in, you do not
+connect anything, and you do not agree to anything. You install it, and your
+board is there.
+
+
+NO NETWORK. NONE.
+
+TabLanes makes no network requests of any kind. Not for analytics, not for
+telemetry, not for crash reports, not for fonts, not for favicons, not for an
+update check, not once.
+
+There is no remote code: every file the extension runs ships inside the package
+you install, which is why the whole thing works with the network off, on a
+plane, or behind the strictest firewall your employer operates. The board that
+loads when you are offline is the same board, complete, with every file you have
+ever attached to it.
+
+It asks for a single permission — unlimitedStorage — so that a browser quota
+never quietly truncates your board when you attach large files. It cannot read
+your browsing history, your open tabs, or the contents of any page you visit,
+because it never asks for the ability to.
+
+Removing the extension deletes the database and the attachments with it. There
+is no copy anywhere else, and no account to close.
+
+
+FAST, MEASURED HONESTLY
+
+Speed here is not a slogan. The board is a local database query and a render:
+there is no request in the critical path, so there is nothing to be slow.
+Reordering a card is a single database update rather than a renumbering of every
+card in the lane, which is why dragging stays smooth in a lane with hundreds of
+cards. Writes are batched and flushed the moment the tab goes away, so closing a
+tab a half-second after you type never costs you the thing you typed.
+
+
+WHAT IT DOES NOT DO
+
+Being clear about this saves you a download.
+
+TabLanes does not sync between machines, because it has no server to sync
+through. It has no collaborators, no comments, no assignees, no notifications.
+It has no due dates, labels, checklists, or automations. It is one board, not
+many. If you need a shared project tracker for a team, you want a different
+product, and you already know which ones.
+
+What it does is hold your own work, in front of you, instantly, privately, every
+time you open a tab.
+
+
+WHO IT IS FOR
+
+People who keep a task list and resent how much friction stands between them and
+it. Developers who want the current branch's work visible without leaving the
+browser. Writers tracking drafts through stages. Researchers with a lane of
+papers to read and a lane of papers read. Students with a lane per course. Job
+hunters with a lane per stage of the pipeline and a card per company, each one
+carrying the posting, the contact and the version of the CV they sent. Anyone
+who has ever pinned a task tracker to a tab and then lost it behind forty other
+tabs.
+
+And anyone who would simply prefer their to-do list not to live on someone
+else's computer.
+
+
+SMALL THINGS YOU WILL NOTICE
+
+Enter adds the card and keeps the composer open; Shift and Enter together give
+you a second line. Escape backs out of whatever you are in — the composer, the
+search box, an open card. Clicking outside a card closes it, and everything you
+typed is already saved.
+
+
+GETTING STARTED
+
+Install it and open a new tab. Three lanes are waiting. Rename them to whatever
+your work is actually called, add a card, and you are running. There is no
+tutorial because there is nothing to learn: it is a board, and it behaves the
+way you expect a board to behave.
+
+
+OPEN SOURCE
+
+TabLanes is open source. Every line it runs is public, which is the only way a
+claim like "this never touches the network" can mean anything — you do not have
+to take our word for it, you can read the code, or watch the network panel stay
+empty for as long as you like.
+
+https://github.com/lmairmeet/tablanes

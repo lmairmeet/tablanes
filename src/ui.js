@@ -92,9 +92,11 @@ export function toast(message, action) {
   toastTimer = setTimeout(dismiss, action ? 6500 : 3000);
 }
 
+let closeMenu = null;
+
 /** Opens a popover menu anchored to an element; closes on outside click, Esc or scroll. */
 export function menu(anchor, items) {
-  document.querySelector('.menu')?.remove();
+  closeMenu?.();
   const rect = anchor.getBoundingClientRect();
   const node = h(
     'div',
@@ -120,6 +122,8 @@ export function menu(anchor, items) {
   node.style.top = `${Math.min(rect.bottom + 6, innerHeight - node.offsetHeight - 8)}px`;
 
   const close = () => {
+    clearTimeout(listenerTimer);
+    closeMenu = null;
     node.remove();
     removeEventListener('pointerdown', onOutside, true);
     removeEventListener('keydown', onKey, true);
@@ -134,7 +138,8 @@ export function menu(anchor, items) {
       close();
     }
   };
-  setTimeout(() => {
+  closeMenu = close;
+  const listenerTimer = setTimeout(() => {
     addEventListener('pointerdown', onOutside, true);
     addEventListener('keydown', onKey, true);
     addEventListener('scroll', close, true);

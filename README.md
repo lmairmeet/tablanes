@@ -61,3 +61,16 @@ node scripts/screenshots.mjs
 
 serves the extension under the manifest's exact CSP and captures the store
 screenshots into `store/screenshots/`.
+
+Performance and lifecycle regression checks (Node.js 22+ and Google Chrome on macOS):
+
+```bash
+node scripts/performance-check.mjs
+```
+
+These use an isolated temporary browser profile to check image loading limits,
+URL and listener cleanup, interrupted drags, search coalescing, and database
+persistence under slow storage. They do not use your installed extension's data.
+
+When shipping a code update, also update `VERSION_UPDATED_AT` in `src/app.js` so
+the footer reports the release's date and time.

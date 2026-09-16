@@ -5,7 +5,8 @@ const SCHEMA_VERSION = 1;
 
 let db = null;
 let saveTimer = null;
-let savePromise = Promise.resolve();
+let savePromise = null;
+let dirty = false;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS lanes (
@@ -100,11 +101,18 @@ export function all(sql, params = []) {
 }
 
 export function one(sql, params = []) {
-  return all(sql, params)[0] ?? null;
+  const stmt = db.prepare(sql);
+  try {
+    stmt.bind(params);
+    return stmt.step() ? stmt.getAsObject() : null;
+  } finally {
+    stmt.free();
+  }
 }
 
 /** Persist the database to IndexedDB, coalescing bursts of writes. */
 export function scheduleSave() {
+  dirty = true;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 180);
 }
@@ -114,19 +122,30 @@ function flush() {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  if (!db) return savePromise;
-  const bytes = db.export();
-  savePromise = savePromise
-    .then(() => idb.put('kv', DB_KEY, bytes))
-    .catch((err) => console.error('TabLanes: failed to persist database', err));
+  if (!db || !dirty || savePromise) return savePromise;
+  // Keep at most one exported snapshot alive, even when storage is slow.
+  savePromise = Promise.resolve().then(async () => {
+    try {
+      while (dirty) {
+        dirty = false;
+        const bytes = db.export();
+        await idb.put('kv', DB_KEY, bytes);
+      }
+    } catch (err) {
+      dirty = true;
+      console.error('TabLanes: failed to persist database', err);
+    } finally {
+      savePromise = null;
+    }
+  });
   return savePromise;
 }
 
 // A debounced write can still be in flight when the tab goes away. `visibilitychange`
 // fires early enough for the IndexedDB transaction to land; pagehide is the backstop.
 addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && saveTimer) flush();
+  if (document.visibilityState === 'hidden' && dirty) flush();
 });
 addEventListener('pagehide', () => {
-  if (saveTimer) flush();
+  if (dirty) flush();
 });

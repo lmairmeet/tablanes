@@ -23,6 +23,7 @@ paths=(
   src/db.js
   src/dnd.js
   src/idb.js
+  src/images.js
   src/modal.js
   src/store.js
   src/ui.js

@@ -46,8 +46,10 @@ export function getBoard() {
   const countBy = new Map(counts.map((c) => [c.card_id, c]));
   const coverBy = new Map(
     all(
-      `SELECT card_id, id FROM attachments WHERE is_image = 1
-         AND position = (SELECT MIN(position) FROM attachments a2 WHERE a2.card_id = attachments.card_id AND a2.is_image = 1)`
+      `SELECT card_id, id FROM (
+         SELECT card_id, id, ROW_NUMBER() OVER (PARTITION BY card_id ORDER BY position, id) AS rank
+         FROM attachments WHERE is_image = 1
+       ) WHERE rank = 1`
     ).map((r) => [r.card_id, r.id])
   );
 
@@ -109,13 +111,12 @@ export function deleteLane(id) {
   const lane = one('SELECT * FROM lanes WHERE id = ?', [id]);
   if (!lane) return null;
   const cards = all('SELECT * FROM cards WHERE lane_id = ?', [id]);
-  const ids = cards.map((c) => c.id);
   const snapshot = {
     kind: 'lane',
     lane,
     cards,
-    links: ids.flatMap((cid) => all('SELECT * FROM links WHERE card_id = ?', [cid])),
-    attachments: ids.flatMap((cid) => all('SELECT * FROM attachments WHERE card_id = ?', [cid])),
+    links: all('SELECT links.* FROM links JOIN cards ON cards.id = links.card_id WHERE cards.lane_id = ?', [id]),
+    attachments: all('SELECT attachments.* FROM attachments JOIN cards ON cards.id = attachments.card_id WHERE cards.lane_id = ?', [id]),
   };
   run('DELETE FROM lanes WHERE id = ?', [id]);
   scheduleSave();

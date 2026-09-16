@@ -104,7 +104,9 @@ let nextId = 1;
 const pending = new Map();
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-  pending.get(msg.id)?.(msg);
+  const resolve = pending.get(msg.id);
+  pending.delete(msg.id);
+  resolve?.(msg);
 };
 const send = (method, params = {}) =>
   new Promise((resolve, reject) => {
