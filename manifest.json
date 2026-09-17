@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TabLanes",
   "short_name": "TabLanes",
-  "version": "1.0.0",
+  "version": "1.5",
   "description": "A fast kanban board on every new tab. Lanes, cards, files and images — stored locally in SQLite, never uploaded.",
   "homepage_url": "https://github.com/lmairmeet/tablanes",
   "minimum_chrome_version": "102",
