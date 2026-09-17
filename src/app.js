@@ -7,12 +7,22 @@ import { h, icon, menu, toast, highlight } from './ui.js';
 
 const board = document.getElementById('board');
 const searchInput = document.getElementById('search');
-const stats = document.getElementById('stats');
 const versionFooter = document.getElementById('version-footer');
+const boardTabs = document.getElementById('board-tabs');
+const addBoardButton = document.getElementById('add-board');
+const boardDialog = document.getElementById('board-dialog');
+const boardForm = document.getElementById('board-form');
+const boardNameField = document.getElementById('board-name-field');
+const boardNameInput = document.getElementById('board-name');
+const boardNameError = document.getElementById('board-name-error');
+const boardDialogTitle = document.getElementById('board-dialog-title');
+const boardColorField = document.getElementById('board-color-field');
+const boardColors = document.getElementById('board-colors');
+const submitBoardButton = document.getElementById('submit-board');
 
 // Update this value whenever the extension code changes. Keeping it explicit
 // means the footer describes the shipped version, rather than page load time.
-const VERSION_UPDATED_AT = '2026-09-16T08:49:48+05:30';
+const VERSION_UPDATED_AT = '2026-09-17T21:54:29+05:30';
 
 versionFooter.textContent = `Version updated on ${new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -24,6 +34,12 @@ let covers = null;
 let lanesCache = null;
 let searchTimer = null;
 let composingIn = null; // lane id with an open card composer
+let boardsCache = [];
+let activeBoardId = null;
+let savingBoard = false;
+let editingBoardId = null;
+let editingBoardField = null;
+let selectedBoardColor = store.DEFAULT_BOARD_COLOR;
 
 // ------------------------------------------------------------------ render
 
@@ -32,7 +48,7 @@ function render(readStore = true) {
   covers?.dispose();
   covers = imageScope(store.getBlob);
 
-  const lanes = readStore || !lanesCache ? (lanesCache = store.getBoard()) : lanesCache;
+  const lanes = readStore || !lanesCache ? (lanesCache = store.getBoard(activeBoardId)) : lanesCache;
   const scroll = board.scrollLeft;
   const scrollTops = new Map(
     [...board.querySelectorAll('.lane')].map((l) => [l.dataset.id, l.querySelector('.lane-cards').scrollTop])
@@ -44,19 +60,89 @@ function render(readStore = true) {
     laneComposer()
   );
   board.scrollLeft = scroll;
-  renderStats(lanes);
 }
 
-function renderStats(lanes) {
-  const total = lanes.reduce((n, lane) => n + lane.cards.length, 0);
-  if (query) {
-    const shown = lanes.reduce((n, lane) => n + lane.cards.filter(matches).length, 0);
-    stats.textContent = `${shown} of ${total} ${total === 1 ? 'card' : 'cards'}`;
-  } else {
-    stats.textContent = total
-      ? `${total} ${total === 1 ? 'card' : 'cards'} · ${lanes.length} ${lanes.length === 1 ? 'lane' : 'lanes'}`
-      : '';
-  }
+function renderBoardTabs() {
+  boardTabs.replaceChildren(
+    ...boardsCache.map((item) => {
+          const tab = h(
+            'button',
+            {
+              class: `board-tab${item.id === activeBoardId ? ' is-active' : ''}`,
+              type: 'button',
+              role: 'tab',
+              'aria-selected': item.id === activeBoardId ? 'true' : 'false',
+              'aria-label': item.title,
+              tabindex: item.id === activeBoardId ? '0' : '-1',
+              title: item.title,
+              dataset: { id: item.id },
+              onclick: () => switchBoard(item.id),
+            },
+            h('span', { text: boardTabTitle(item.title) })
+          );
+          const options = h(
+            'button',
+            {
+              class: 'board-tab-menu',
+              type: 'button',
+              'aria-label': `Options for ${item.title}`,
+              title: 'Board options',
+              onclick: (event) => {
+                event.stopPropagation();
+                menu(event.currentTarget, [
+                  { icon: 'pencil', label: 'Edit name', run: () => openBoardDialog(item, 'name') },
+                  { icon: 'palette', label: 'Edit color', run: () => openBoardDialog(item, 'color') },
+                ]);
+              },
+            },
+            icon('dots')
+          );
+          const itemNode = h(
+            'div',
+            {
+              class: `board-tab-item${item.id === activeBoardId ? ' is-active' : ''}`,
+              role: 'presentation',
+              dataset: { id: item.id },
+            },
+            [tab, options]
+          );
+          itemNode.style.setProperty('--tab-color', item.color);
+          return itemNode;
+        })
+  );
+  applyBoardTheme();
+}
+
+function boardTabTitle(title) {
+  const characters = Array.from(title);
+  return characters.length > 25 ? `${characters.slice(0, 25).join('')}…` : title;
+}
+
+function activeBoard() {
+  return boardsCache.find((item) => item.id === activeBoardId) ?? boardsCache[0] ?? null;
+}
+
+function applyBoardTheme() {
+  const current = activeBoard();
+  const color = current?.color ?? store.DEFAULT_BOARD_COLOR;
+  document.body.style.setProperty('--board-color', color);
+  board.setAttribute('aria-label', current ? `${current.title} board` : 'Board');
+}
+
+function switchBoard(boardId) {
+  if (boardId === activeBoardId || !boardsCache.some((item) => item.id === boardId)) return;
+  const cardDialog = document.getElementById('card-dialog');
+  if (cardDialog.open) cardDialog.close();
+  activeBoardId = boardId;
+  store.setActiveBoardId(boardId);
+  query = '';
+  searchInput.value = '';
+  composingIn = null;
+  lanesCache = null;
+  board.scrollLeft = 0;
+  renderBoardTabs();
+  render();
+  boardTabs.querySelector(`[data-id="${CSS.escape(boardId)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 function matches(card) {
@@ -142,7 +228,7 @@ function undoable(message, snapshot) {
 }
 
 function openCardDialog(cardId) {
-  openCard(cardId, { onChange: render, onDelete: (snapshot) => undoable('Card deleted', snapshot) });
+  openCard(activeBoardId, cardId, { onChange: render, onDelete: (snapshot) => undoable('Card deleted', snapshot) });
 }
 
 /** Swaps the lane heading for an input so the header itself stays draggable. */
@@ -156,7 +242,9 @@ function startRename(lane) {
   const commit = (save) => {
     if (settled) return;
     settled = true;
-    if (save && input.value.trim() && input.value.trim() !== lane.title) store.renameLane(lane.id, input.value);
+    if (save && input.value.trim() && input.value.trim() !== lane.title) {
+      store.renameLane(activeBoardId, lane.id, input.value);
+    }
     render();
   };
 
@@ -177,7 +265,7 @@ function laneMenu(anchor, lane) {
       icon: 'top',
       label: 'Add card to top',
       run: () => {
-        const id = store.createCard(lane.id, 'New card', true);
+        const id = store.createCard(activeBoardId, lane.id, 'New card', true);
         render();
         openCardDialog(id);
       },
@@ -187,7 +275,7 @@ function laneMenu(anchor, lane) {
       icon: 'trash',
       label: 'Delete lane',
       danger: true,
-      run: () => undoable(`Deleted “${lane.title}”`, store.deleteLane(lane.id)),
+      run: () => undoable(`Deleted “${lane.title}”`, store.deleteLane(activeBoardId, lane.id)),
     },
   ]);
 }
@@ -227,7 +315,7 @@ function cardComposer(laneId) {
   const submit = () => {
     const value = input.value.trim();
     if (!value) return closeComposer();
-    store.createCard(laneId, value);
+    store.createCard(activeBoardId, laneId, value);
     render();
     const next = board.querySelector(`.lane[data-id="${laneId}"] .composer textarea`);
     next?.focus();
@@ -258,7 +346,7 @@ function laneComposer() {
       {
         class: 'no-drag',
         onclick: () => {
-          const id = store.createLane('New lane');
+          const id = store.createLane(activeBoardId, 'New lane');
           render();
           board.scrollLeft = board.scrollWidth;
           startRename({ id, title: 'New lane' });
@@ -292,19 +380,160 @@ addEventListener('keydown', (e) => {
   searchInput.select();
 });
 
+function selectBoardColor(color) {
+  selectedBoardColor = store.BOARD_COLORS.includes(color) ? color : store.DEFAULT_BOARD_COLOR;
+  for (const option of boardColors.querySelectorAll('.color-option')) {
+    const selected = option.dataset.color === selectedBoardColor;
+    option.setAttribute('aria-checked', selected ? 'true' : 'false');
+    option.tabIndex = selected ? 0 : -1;
+  }
+}
+
+function openBoardDialog(item = null, field = null) {
+  editingBoardId = item?.id ?? null;
+  editingBoardField = item ? field : null;
+  boardForm.reset();
+  boardNameError.textContent = '';
+  boardNameInput.removeAttribute('aria-invalid');
+  boardNameField.hidden = editingBoardField === 'color';
+  boardColorField.hidden = editingBoardField === 'name';
+  boardDialogTitle.textContent = editingBoardField === 'name'
+    ? 'Edit board name'
+    : editingBoardField === 'color'
+      ? 'Edit board color'
+      : 'Create a board';
+  submitBoardButton.textContent = editingBoardField === 'name'
+    ? 'Save name'
+    : editingBoardField === 'color'
+      ? 'Save color'
+      : 'Create board';
+  boardNameInput.value = item?.title ?? '';
+  selectBoardColor(item?.color ?? store.DEFAULT_BOARD_COLOR);
+  boardDialog.showModal();
+  requestAnimationFrame(() => {
+    if (editingBoardField === 'color') {
+      boardColors.querySelector('[aria-checked="true"]')?.focus();
+    } else {
+      boardNameInput.focus();
+      if (item) boardNameInput.select();
+    }
+  });
+}
+
+boardColors.replaceChildren(
+  ...store.BOARD_COLORS.map((color, index) =>
+    h('button', {
+      class: 'color-option',
+      type: 'button',
+      role: 'radio',
+      'aria-label': `Color ${index + 1}`,
+      'aria-checked': index === 0 ? 'true' : 'false',
+      tabindex: index === 0 ? '0' : '-1',
+      dataset: { color },
+      style: `--choice-color:${color}`,
+      onclick: () => selectBoardColor(color),
+    })
+  )
+);
+
+addBoardButton.replaceChildren(icon('plus'));
+addBoardButton.addEventListener('click', () => openBoardDialog());
+
+document.getElementById('cancel-board').addEventListener('click', () => boardDialog.close());
+
+boardForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (savingBoard) return;
+  const title = boardNameInput.value.trim();
+  if (editingBoardField !== 'color' && !title) {
+    boardNameError.textContent = 'Enter a board name.';
+    boardNameInput.setAttribute('aria-invalid', 'true');
+    boardNameInput.focus();
+    return;
+  }
+
+  savingBoard = true;
+  submitBoardButton.disabled = true;
+  try {
+    if (editingBoardId) {
+      store.updateBoard(
+        editingBoardId,
+        editingBoardField === 'color' ? { color: selectedBoardColor } : { title }
+      );
+      boardsCache = store.getBoards();
+      boardDialog.close();
+      renderBoardTabs();
+      return;
+    }
+
+    const id = store.createBoard(title, selectedBoardColor);
+    boardsCache = store.getBoards();
+    activeBoardId = id;
+    store.setActiveBoardId(id);
+    query = '';
+    searchInput.value = '';
+    composingIn = null;
+    lanesCache = null;
+    board.scrollLeft = 0;
+    boardDialog.close();
+    renderBoardTabs();
+    render();
+  } finally {
+    savingBoard = false;
+    submitBoardButton.disabled = false;
+  }
+});
+
+boardNameInput.addEventListener('input', () => {
+  if (!boardNameInput.value.trim()) return;
+  boardNameError.textContent = '';
+  boardNameInput.removeAttribute('aria-invalid');
+});
+
+boardTabs.addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const tabs = [...boardTabs.querySelectorAll('[role="tab"]')];
+  if (!tabs.length) return;
+  e.preventDefault();
+  const current = tabs.indexOf(document.activeElement);
+  let next = current;
+  if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = tabs.length - 1;
+  else next = (current + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  tabs[next].focus();
+  switchBoard(tabs[next].dataset.id);
+});
+
+boardColors.addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+  const options = [...boardColors.querySelectorAll('.color-option')];
+  e.preventDefault();
+  const current = Math.max(0, options.indexOf(document.activeElement));
+  let next = current;
+  if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = options.length - 1;
+  else next = (current + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + options.length) % options.length;
+  selectBoardColor(options[next].dataset.color);
+  options[next].focus();
+});
+
 // --------------------------------------------------------------------- boot
 
 initDb()
   .then(() => {
+    boardsCache = store.getBoards();
+    activeBoardId = store.getActiveBoardId(boardsCache);
+    store.setActiveBoardId(activeBoardId);
+    renderBoardTabs();
     render();
     initDnd({
       board,
       onCardMove: (cardId, laneId, beforeId, afterId) => {
-        store.moveCard(cardId, laneId, beforeId, afterId);
+        store.moveCard(activeBoardId, cardId, laneId, beforeId, afterId);
         render();
       },
       onLaneMove: (laneId, beforeId, afterId) => {
-        store.moveLane(laneId, beforeId, afterId);
+        store.moveLane(activeBoardId, laneId, beforeId, afterId);
         render();
       },
     });

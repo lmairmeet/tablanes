@@ -8,18 +8,22 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="brand-name">TabLanes</span>
+      <div class="topbar-start">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="brand-name">TabLanes</span>
+        </div>
+        <div class="search">
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" />
+          </svg>
+          <input id="search" type="search" placeholder="Search cards" autocomplete="off" spellcheck="false" />
+          <kbd class="search-hint">/</kbd>
       </div>
-      <div class="search">
-        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" />
-        </svg>
-        <input id="search" type="search" placeholder="Search cards" autocomplete="off" spellcheck="false" />
-        <kbd class="search-hint">/</kbd>
-      </div>
-      <p class="stats" id="stats" aria-live="polite"></p>
+      <nav class="board-nav" id="board-nav" aria-label="Boards">
+        <button class="board-action" id="add-board" type="button" aria-label="Create board" title="Create board"></button>
+        <div class="board-tabs" id="board-tabs" role="tablist" aria-label="Choose a board"></div>
+      </nav>
     </header>
 
     <main class="board" id="board" aria-label="Board"></main>
@@ -28,6 +32,24 @@
 
     <div class="toast-host" id="toast-host" aria-live="polite"></div>
     <dialog class="dialog" id="card-dialog" aria-label="Card details"></dialog>
+    <dialog class="dialog board-dialog" id="board-dialog" aria-labelledby="board-dialog-title">
+      <form class="board-form" id="board-form" novalidate>
+        <h2 id="board-dialog-title">Create a board</h2>
+        <div class="board-name-field" id="board-name-field">
+          <label for="board-name">Board name</label>
+          <input id="board-name" type="text" maxlength="120" autocomplete="off" aria-describedby="board-name-error" />
+          <p class="field-error" id="board-name-error" aria-live="polite"></p>
+        </div>
+        <fieldset class="color-field" id="board-color-field">
+          <legend>Board color</legend>
+          <div class="color-palette" id="board-colors" role="radiogroup" aria-label="Board color"></div>
+        </fieldset>
+        <div class="board-form-actions">
+          <button class="btn-ghost" id="cancel-board" type="button">Cancel</button>
+          <button class="btn" id="submit-board" type="submit">Create board</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="vendor/sql-wasm.js"></script>
     <script type="module" src="src/app.js"></script>

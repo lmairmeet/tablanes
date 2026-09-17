@@ -22,9 +22,9 @@ function normalizeUrl(input) {
   return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
 }
 
-export function openCard(cardId, { onChange, onDelete }) {
+export function openCard(boardId, cardId, { onChange, onDelete }) {
   flushSave();
-  session = { cardId, onChange, onDelete };
+  session = { boardId, cardId, onChange, onDelete };
   render();
   if (!dialog.open) dialog.showModal();
 }
@@ -50,10 +50,10 @@ dialog.addEventListener('pointerdown', (e) => {
 
 function scheduleSave(fields) {
   clearTimeout(saveTimer);
-  const id = session.cardId;
+  const { boardId, cardId } = session;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    store.updateCard(id, fields);
+    store.updateCard(boardId, cardId, fields);
     session?.onChange();
     markSaved();
   }, 400);
@@ -66,7 +66,10 @@ function flushSave() {
   const title = dialog.querySelector('.dialog-title');
   const description = dialog.querySelector('.description');
   if (title && session) {
-    store.updateCard(session.cardId, { title: title.value.trim() || 'Untitled', description: description.value });
+    store.updateCard(session.boardId, session.cardId, {
+      title: title.value.trim() || 'Untitled',
+      description: description.value,
+    });
     session.onChange();
   }
 }
@@ -86,7 +89,7 @@ function refresh() {
 }
 
 function render() {
-  const card = store.getCard(session.cardId);
+  const card = store.getCard(session.boardId, session.cardId);
   if (!card) return dialog.close();
 
   images?.dispose();
@@ -121,12 +124,12 @@ function render() {
       h('section', {}, [
         h('div', { class: 'field-label' }, [icon('link'), h('span', { text: 'Links' })]),
         ...card.links.map(linkRow),
-        linkForm(card.id),
+        linkForm(session.boardId, card.id),
       ]),
       h('section', {}, [
         h('div', { class: 'field-label' }, [icon('clip'), h('span', { text: 'Files & images' })]),
         ...card.attachments.map(fileRow),
-        dropzone(card.id),
+        dropzone(session.boardId, card.id),
       ]),
       h('div', { class: 'dialog-foot' }, [
         h(
@@ -135,7 +138,7 @@ function render() {
             class: 'btn-ghost btn-danger',
             onclick: () => {
               const notify = session.onDelete;
-              const snapshot = store.deleteCard(card.id);
+              const snapshot = store.deleteCard(session.boardId, card.id);
               dialog.close();
               notify(snapshot);
             },
@@ -166,7 +169,7 @@ function linkRow(link) {
         style: 'opacity:1',
         title: 'Remove link',
         onclick: () => {
-          store.deleteLink(link.id);
+          store.deleteLink(session.boardId, link.id);
           refresh();
         },
       },
@@ -175,7 +178,7 @@ function linkRow(link) {
   ]);
 }
 
-function linkForm(cardId) {
+function linkForm(boardId, cardId) {
   const url = h('input', { type: 'text', placeholder: 'Paste a URL', 'aria-label': 'Link URL' });
   const label = h('input', { type: 'text', class: 'label-input', placeholder: 'Label (optional)' });
 
@@ -186,7 +189,7 @@ function linkForm(cardId) {
       if (url.value.trim()) toast('That does not look like a web link.');
       return;
     }
-    store.addLink(cardId, parsed.href, label.value.trim());
+    store.addLink(boardId, cardId, parsed.href, label.value.trim());
     refresh();
   };
 
@@ -225,7 +228,7 @@ function fileRow(file) {
         style: 'opacity:1',
         title: 'Remove file',
         onclick: () => {
-          store.deleteAttachment(file.id);
+          store.deleteAttachment(session.boardId, file.id);
           refresh();
         },
       },
@@ -270,7 +273,7 @@ async function lightbox(file) {
   document.body.append(box);
 }
 
-function dropzone(cardId) {
+function dropzone(boardId, cardId) {
   const input = h('input', {
     type: 'file',
     multiple: true,
@@ -287,7 +290,7 @@ function dropzone(cardId) {
   const owner = session;
   const add = async (files) => {
     try {
-      for (const file of files) await store.addAttachment(cardId, file);
+      for (const file of files) await store.addAttachment(boardId, cardId, file);
       if (session === owner && dialog.open) refresh();
       else owner.onChange();
     } catch (err) {

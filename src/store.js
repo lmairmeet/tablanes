@@ -3,6 +3,13 @@ import { idb } from './idb.js';
 
 const GAP = 1024;
 const MIN_GAP = 0.0001;
+const ACTIVE_BOARD_KEY = 'tablanes.activeBoardId';
+export const BOARD_COLORS = ['#7c81f2', '#9b6ee8', '#4f8fe8', '#29a6b8', '#46a36f', '#d19a32', '#dc7547', '#d8647b'];
+export const DEFAULT_BOARD_COLOR = BOARD_COLORS[0];
+
+function boardColor(color) {
+  return BOARD_COLORS.includes(color) ? color : DEFAULT_BOARD_COLOR;
+}
 
 /**
  * Fractional positioning: a move rewrites one row instead of renumbering the
@@ -20,8 +27,8 @@ function needsRespread(before, after) {
   return before != null && after != null && Math.abs(after - before) < MIN_GAP;
 }
 
-function respreadLanes() {
-  all('SELECT id FROM lanes ORDER BY position, created_at').forEach((row, i) =>
+function respreadLanes(boardId) {
+  all('SELECT id FROM lanes WHERE board_id = ? ORDER BY position, created_at', [boardId]).forEach((row, i) =>
     run('UPDATE lanes SET position = ? WHERE id = ?', [(i + 1) * GAP, row.id])
   );
 }
@@ -34,22 +41,88 @@ function respreadCards(laneId) {
 
 // ---------------------------------------------------------------- reads
 
-export function getBoard() {
-  const lanes = all('SELECT * FROM lanes ORDER BY position, created_at');
-  const cards = all('SELECT * FROM cards ORDER BY position, created_at');
+export function getBoards() {
+  return all('SELECT * FROM boards ORDER BY position, created_at');
+}
+
+export function createBoard(title, color = DEFAULT_BOARD_COLOR) {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return null;
+  const id = uid();
+  const last = one('SELECT MAX(position) AS p FROM boards');
+  run('INSERT INTO boards (id, title, color, position, created_at) VALUES (?, ?, ?, ?, ?)', [
+    id,
+    cleanTitle,
+    boardColor(color),
+    positionBetween(last?.p ?? null, null),
+    Date.now(),
+  ]);
+  scheduleSave();
+  return id;
+}
+
+export function updateBoard(id, { title, color }) {
+  const current = one('SELECT title, color FROM boards WHERE id = ?', [id]);
+  if (!current) return false;
+  const cleanTitle = (title ?? current.title).trim();
+  if (!cleanTitle) return false;
+  run('UPDATE boards SET title = ?, color = ? WHERE id = ?', [
+    cleanTitle,
+    color == null ? current.color : boardColor(color),
+    id,
+  ]);
+  scheduleSave();
+  return true;
+}
+
+export function getActiveBoardId(boards = getBoards()) {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(ACTIVE_BOARD_KEY);
+  } catch {}
+  return boards.some((board) => board.id === saved) ? saved : boards[0]?.id ?? null;
+}
+
+export function setActiveBoardId(boardId) {
+  try {
+    if (boardId) localStorage.setItem(ACTIVE_BOARD_KEY, boardId);
+    else localStorage.removeItem(ACTIVE_BOARD_KEY);
+  } catch {}
+}
+
+export function getBoard(boardId) {
+  const lanes = all('SELECT * FROM lanes WHERE board_id = ? ORDER BY position, created_at', [boardId]);
+  const cards = all(
+    `SELECT cards.* FROM cards
+     JOIN lanes ON lanes.id = cards.lane_id
+     WHERE lanes.board_id = ?
+     ORDER BY cards.position, cards.created_at`,
+    [boardId]
+  );
   const counts = all(
     `SELECT card_id, SUM(kind = 'link') AS links, SUM(kind = 'file') AS files FROM (
-        SELECT card_id, 'link' AS kind FROM links
-        UNION ALL SELECT card_id, 'file' AS kind FROM attachments
-     ) GROUP BY card_id`
+        SELECT links.card_id, 'link' AS kind FROM links
+        JOIN cards ON cards.id = links.card_id JOIN lanes ON lanes.id = cards.lane_id
+        WHERE lanes.board_id = ?
+        UNION ALL
+        SELECT attachments.card_id, 'file' AS kind FROM attachments
+        JOIN cards ON cards.id = attachments.card_id JOIN lanes ON lanes.id = cards.lane_id
+        WHERE lanes.board_id = ?
+     ) GROUP BY card_id`,
+    [boardId, boardId]
   );
   const countBy = new Map(counts.map((c) => [c.card_id, c]));
   const coverBy = new Map(
     all(
       `SELECT card_id, id FROM (
-         SELECT card_id, id, ROW_NUMBER() OVER (PARTITION BY card_id ORDER BY position, id) AS rank
-         FROM attachments WHERE is_image = 1
-       ) WHERE rank = 1`
+         SELECT attachments.card_id, attachments.id,
+           ROW_NUMBER() OVER (PARTITION BY attachments.card_id ORDER BY attachments.position, attachments.id) AS rank
+         FROM attachments
+         JOIN cards ON cards.id = attachments.card_id
+         JOIN lanes ON lanes.id = cards.lane_id
+         WHERE attachments.is_image = 1 AND lanes.board_id = ?
+       ) WHERE rank = 1`,
+      [boardId]
     ).map((r) => [r.card_id, r.id])
   );
 
@@ -68,8 +141,12 @@ export function getBoard() {
   return [...byLane.values()];
 }
 
-export function getCard(id) {
-  const card = one('SELECT * FROM cards WHERE id = ?', [id]);
+export function getCard(boardId, id) {
+  const card = one(
+    `SELECT cards.* FROM cards JOIN lanes ON lanes.id = cards.lane_id
+     WHERE cards.id = ? AND lanes.board_id = ?`,
+    [id, boardId]
+  );
   if (!card) return null;
   card.links = all('SELECT * FROM links WHERE card_id = ? ORDER BY position', [id]);
   card.attachments = all('SELECT * FROM attachments WHERE card_id = ? ORDER BY position', [id]);
@@ -78,11 +155,13 @@ export function getCard(id) {
 
 // ---------------------------------------------------------------- lanes
 
-export function createLane(title) {
+export function createLane(boardId, title) {
+  if (!one('SELECT id FROM boards WHERE id = ?', [boardId])) return null;
   const id = uid();
-  const last = one('SELECT MAX(position) AS p FROM lanes');
-  run('INSERT INTO lanes (id, title, position, created_at) VALUES (?, ?, ?, ?)', [
+  const last = one('SELECT MAX(position) AS p FROM lanes WHERE board_id = ?', [boardId]);
+  run('INSERT INTO lanes (id, board_id, title, position, created_at) VALUES (?, ?, ?, ?, ?)', [
     id,
+    boardId,
     title.trim() || 'Untitled',
     positionBetween(last?.p ?? null, null),
     Date.now(),
@@ -91,24 +170,26 @@ export function createLane(title) {
   return id;
 }
 
-export function renameLane(id, title) {
-  run('UPDATE lanes SET title = ? WHERE id = ?', [title.trim() || 'Untitled', id]);
+export function renameLane(boardId, id, title) {
+  run('UPDATE lanes SET title = ? WHERE id = ? AND board_id = ?', [title.trim() || 'Untitled', id, boardId]);
   scheduleSave();
 }
 
 /** Placed relative to its dropped neighbours rather than an index, so a filtered
  *  view (where hidden rows sit between the visible ones) still lands correctly. */
-export function moveLane(id, beforeId, afterId) {
-  const before = beforeId ? one('SELECT position FROM lanes WHERE id = ?', [beforeId])?.position ?? null : null;
-  const after = afterId ? one('SELECT position FROM lanes WHERE id = ?', [afterId])?.position ?? null : null;
-  run('UPDATE lanes SET position = ? WHERE id = ?', [positionBetween(before, after), id]);
-  if (needsRespread(before, after)) respreadLanes();
+export function moveLane(boardId, id, beforeId, afterId) {
+  const positionOf = (laneId) =>
+    laneId ? one('SELECT position FROM lanes WHERE id = ? AND board_id = ?', [laneId, boardId])?.position ?? null : null;
+  const before = positionOf(beforeId);
+  const after = positionOf(afterId);
+  run('UPDATE lanes SET position = ? WHERE id = ? AND board_id = ?', [positionBetween(before, after), id, boardId]);
+  if (needsRespread(before, after)) respreadLanes(boardId);
   scheduleSave();
 }
 
 /** Deletes a lane and its cards, returning a snapshot that `restore` can replay. */
-export function deleteLane(id) {
-  const lane = one('SELECT * FROM lanes WHERE id = ?', [id]);
+export function deleteLane(boardId, id) {
+  const lane = one('SELECT * FROM lanes WHERE id = ? AND board_id = ?', [id, boardId]);
   if (!lane) return null;
   const cards = all('SELECT * FROM cards WHERE lane_id = ?', [id]);
   const snapshot = {
@@ -125,7 +206,8 @@ export function deleteLane(id) {
 
 // ---------------------------------------------------------------- cards
 
-export function createCard(laneId, title, atTop = false) {
+export function createCard(boardId, laneId, title, atTop = false) {
+  if (!one('SELECT id FROM lanes WHERE id = ? AND board_id = ?', [laneId, boardId])) return null;
   const id = uid();
   const now = Date.now();
   const edge = one(
@@ -141,21 +223,29 @@ export function createCard(laneId, title, atTop = false) {
   return id;
 }
 
-export function updateCard(id, fields) {
+export function updateCard(boardId, id, fields) {
   const allowed = ['title', 'description'];
   const keys = Object.keys(fields).filter((k) => allowed.includes(k));
   if (!keys.length) return;
-  run(`UPDATE cards SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, [
+  run(`UPDATE cards SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ?
+       WHERE id = ? AND lane_id IN (SELECT id FROM lanes WHERE board_id = ?)`, [
     ...keys.map((k) => fields[k]),
     Date.now(),
     id,
+    boardId,
   ]);
   scheduleSave();
 }
 
-export function moveCard(id, laneId, beforeId, afterId) {
+export function moveCard(boardId, id, laneId, beforeId, afterId) {
+  const ownsCard = one(
+    'SELECT cards.id FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE cards.id = ? AND lanes.board_id = ?',
+    [id, boardId]
+  );
+  const ownsLane = one('SELECT id FROM lanes WHERE id = ? AND board_id = ?', [laneId, boardId]);
+  if (!ownsCard || !ownsLane) return false;
   const positionOf = (cardId) =>
-    cardId ? one('SELECT position FROM cards WHERE id = ?', [cardId])?.position ?? null : null;
+    cardId ? one('SELECT position FROM cards WHERE id = ? AND lane_id = ?', [cardId, laneId])?.position ?? null : null;
   let before = positionOf(beforeId);
   let after = positionOf(afterId);
 
@@ -182,10 +272,15 @@ export function moveCard(id, laneId, beforeId, afterId) {
   run('UPDATE cards SET lane_id = ?, position = ? WHERE id = ?', [laneId, positionBetween(before, after), id]);
   if (needsRespread(before, after)) respreadCards(laneId);
   scheduleSave();
+  return true;
 }
 
-export function deleteCard(id) {
-  const card = one('SELECT * FROM cards WHERE id = ?', [id]);
+export function deleteCard(boardId, id) {
+  const card = one(
+    `SELECT cards.* FROM cards JOIN lanes ON lanes.id = cards.lane_id
+     WHERE cards.id = ? AND lanes.board_id = ?`,
+    [id, boardId]
+  );
   if (!card) return null;
   const snapshot = {
     kind: 'card',
@@ -203,8 +298,9 @@ export function restore(snapshot) {
   if (!snapshot) return;
   if (snapshot.lane) {
     const l = snapshot.lane;
-    run('INSERT OR REPLACE INTO lanes (id, title, position, created_at) VALUES (?, ?, ?, ?)', [
+    run('INSERT OR REPLACE INTO lanes (id, board_id, title, position, created_at) VALUES (?, ?, ?, ?, ?)', [
       l.id,
+      l.board_id,
       l.title,
       l.position,
       l.created_at,
@@ -236,7 +332,8 @@ export function restore(snapshot) {
 
 // ---------------------------------------------------------------- links
 
-export function addLink(cardId, url, label) {
+export function addLink(boardId, cardId, url, label) {
+  if (!getCard(boardId, cardId)) return null;
   const last = one('SELECT MAX(position) AS p FROM links WHERE card_id = ?', [cardId]);
   run('INSERT INTO links (id, card_id, url, label, position) VALUES (?, ?, ?, ?, ?)', [
     uid(),
@@ -248,14 +345,20 @@ export function addLink(cardId, url, label) {
   scheduleSave();
 }
 
-export function deleteLink(id) {
-  run('DELETE FROM links WHERE id = ?', [id]);
+export function deleteLink(boardId, id) {
+  run(
+    `DELETE FROM links WHERE id = ? AND card_id IN (
+       SELECT cards.id FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?
+     )`,
+    [id, boardId]
+  );
   scheduleSave();
 }
 
 // ---------------------------------------------------------------- attachments
 
-export async function addAttachment(cardId, file) {
+export async function addAttachment(boardId, cardId, file) {
+  if (!getCard(boardId, cardId)) return null;
   const id = uid();
   const last = one('SELECT MAX(position) AS p FROM attachments WHERE card_id = ?', [cardId]);
   await idb.put('blobs', id, file);
@@ -276,8 +379,13 @@ export async function addAttachment(cardId, file) {
   return id;
 }
 
-export function deleteAttachment(id) {
-  run('DELETE FROM attachments WHERE id = ?', [id]);
+export function deleteAttachment(boardId, id) {
+  run(
+    `DELETE FROM attachments WHERE id = ? AND card_id IN (
+       SELECT cards.id FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?
+     )`,
+    [id, boardId]
+  );
   scheduleSave();
 }
 

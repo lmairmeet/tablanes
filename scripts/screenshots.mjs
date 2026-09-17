@@ -157,11 +157,12 @@ await waitFor("document.querySelectorAll('.lane').length === 3", 'seeded lanes')
 await evaluate(`(async () => {
   const store = await import('/src/store.js');
   const demo = ${JSON.stringify(DEMO)};
-  for (const lane of store.getBoard()) {
+  const boardId = store.getBoards()[0].id;
+  for (const lane of store.getBoard(boardId)) {
     if (lane.cards.length) continue;
     for (const [title, description] of demo[lane.title] ?? []) {
-      const id = store.createCard(lane.id, title);
-      if (description) store.updateCard(id, { description });
+      const id = store.createCard(boardId, lane.id, title);
+      if (description) store.updateCard(boardId, id, { description });
     }
   }
 })()`);

@@ -1,7 +1,8 @@
 import { idb } from './idb.js';
 
 const DB_KEY = 'sqlite';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
+const DEFAULT_BOARD_COLOR = '#7c81f2';
 
 let db = null;
 let saveTimer = null;
@@ -9,8 +10,16 @@ let savePromise = null;
 let dirty = false;
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS boards (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  color       TEXT NOT NULL,
+  position    REAL NOT NULL,
+  created_at  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS lanes (
   id          TEXT PRIMARY KEY,
+  board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
   title       TEXT NOT NULL,
   position    REAL NOT NULL,
   created_at  INTEGER NOT NULL
@@ -42,6 +51,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cards_lane ON cards(lane_id, position);
+CREATE INDEX IF NOT EXISTS idx_lanes_board ON lanes(board_id, position);
 CREATE INDEX IF NOT EXISTS idx_links_card ON links(card_id, position);
 CREATE INDEX IF NOT EXISTS idx_attachments_card ON attachments(card_id, position);
 `;
@@ -51,25 +61,90 @@ export async function initDb() {
   const bytes = await idb.get('kv', DB_KEY).catch(() => null);
   db = bytes ? new SQL.Database(new Uint8Array(bytes)) : new SQL.Database();
   db.run('PRAGMA foreign_keys = ON;');
-  db.run(SCHEMA);
-  const current = db.exec('PRAGMA user_version')[0].values[0][0];
-  if (current < SCHEMA_VERSION) db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  if (!bytes) seed();
+  if (!bytes) {
+    db.run(SCHEMA);
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    seed();
+  } else {
+    const current = db.exec('PRAGMA user_version')[0].values[0][0];
+    if (current === 1) migrateV1ToV3();
+    else if (current === 2) migrateV2ToV3();
+    else if (current !== SCHEMA_VERSION) throw new Error(`Unsupported database schema version: ${current}`);
+    db.run(SCHEMA);
+  }
   return db;
 }
 
 function seed() {
   const now = Date.now();
+  const boardId = uid();
+  run('INSERT INTO boards (id, title, color, position, created_at) VALUES (?, ?, ?, ?, ?)', [
+    boardId,
+    'My board',
+    DEFAULT_BOARD_COLOR,
+    1024,
+    now,
+  ]);
   const lanes = ['To do', 'Doing', 'Done'];
   lanes.forEach((title, i) => {
-    run('INSERT INTO lanes (id, title, position, created_at) VALUES (?, ?, ?, ?)', [
+    run('INSERT INTO lanes (id, board_id, title, position, created_at) VALUES (?, ?, ?, ?, ?)', [
       uid(),
+      boardId,
       title,
       (i + 1) * 1024,
       now,
     ]);
   });
   scheduleSave();
+}
+
+/** Version 1 had one implicit board. Attach every existing lane to a real board;
+ * cards, links and attachments keep their existing foreign-key chain unchanged. */
+function migrateV1ToV3() {
+  const now = Date.now();
+  const boardId = uid();
+  db.run('BEGIN');
+  try {
+    db.run(`
+      CREATE TABLE boards (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        color       TEXT NOT NULL,
+        position    REAL NOT NULL,
+        created_at  INTEGER NOT NULL
+      )
+    `);
+    run('INSERT INTO boards (id, title, color, position, created_at) VALUES (?, ?, ?, ?, ?)', [
+      boardId,
+      'My board',
+      DEFAULT_BOARD_COLOR,
+      1024,
+      now,
+    ]);
+    db.run('ALTER TABLE lanes ADD COLUMN board_id TEXT REFERENCES boards(id) ON DELETE CASCADE');
+    run('UPDATE lanes SET board_id = ?', [boardId]);
+    db.run('CREATE INDEX idx_lanes_board ON lanes(board_id, position)');
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.run('COMMIT');
+    scheduleSave();
+  } catch (err) {
+    db.run('ROLLBACK');
+    throw err;
+  }
+}
+
+/** Version 2 introduced boards without customizable colors. */
+function migrateV2ToV3() {
+  db.run('BEGIN');
+  try {
+    db.run(`ALTER TABLE boards ADD COLUMN color TEXT NOT NULL DEFAULT '${DEFAULT_BOARD_COLOR}'`);
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.run('COMMIT');
+    scheduleSave();
+  } catch (err) {
+    db.run('ROLLBACK');
+    throw err;
+  }
 }
 
 export function uid() {
