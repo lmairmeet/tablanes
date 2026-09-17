@@ -12,6 +12,7 @@ const ICONS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   download: '<path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 19h14"/>',
   top: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>',
+  move: '<path d="M5 12h14M14 7l5 5-5 5"/>',
 };
 
 /** Builds an element. Attrs may include text/html/class/dataset/on* handlers. */

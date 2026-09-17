@@ -185,6 +185,18 @@ export function one(sql, params = []) {
   }
 }
 
+export function transaction(work) {
+  db.run('BEGIN');
+  try {
+    const result = work();
+    db.run('COMMIT');
+    return result;
+  } catch (err) {
+    db.run('ROLLBACK');
+    throw err;
+  }
+}
+
 /** Persist the database to IndexedDB, coalescing bursts of writes. */
 export function scheduleSave() {
   dirty = true;

@@ -22,7 +22,7 @@ const submitBoardButton = document.getElementById('submit-board');
 
 // Update this value whenever the extension code changes. Keeping it explicit
 // means the footer describes the shipped version, rather than page load time.
-const VERSION_UPDATED_AT = '2026-09-17T21:54:29+05:30';
+const VERSION_UPDATED_AT = '2026-09-17T22:09:51+05:30';
 
 versionFooter.textContent = `Version updated on ${new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -48,7 +48,11 @@ function render(readStore = true) {
   covers?.dispose();
   covers = imageScope(store.getBlob);
 
-  const lanes = readStore || !lanesCache ? (lanesCache = store.getBoard(activeBoardId)) : lanesCache;
+  const lanes = activeBoardId
+    ? readStore || !lanesCache
+      ? (lanesCache = store.getBoard(activeBoardId))
+      : lanesCache
+    : [];
   const scroll = board.scrollLeft;
   const scrollTops = new Map(
     [...board.querySelectorAll('.lane')].map((l) => [l.dataset.id, l.querySelector('.lane-cards').scrollTop])
@@ -57,7 +61,7 @@ function render(readStore = true) {
   board.replaceChildren(
     ...lanes.map((lane) => renderLane(lane, scrollTops.get(lane.id))),
     ...(lanes.length ? [] : [emptyState()]),
-    laneComposer()
+    ...(activeBoardId ? [laneComposer()] : [])
   );
   board.scrollLeft = scroll;
 }
@@ -92,6 +96,7 @@ function renderBoardTabs() {
                 menu(event.currentTarget, [
                   { icon: 'pencil', label: 'Edit name', run: () => openBoardDialog(item, 'name') },
                   { icon: 'palette', label: 'Edit color', run: () => openBoardDialog(item, 'color') },
+                  { icon: 'trash', label: 'Delete board', danger: true, run: () => removeBoard(item) },
                 ]);
               },
             },
@@ -145,6 +150,48 @@ function switchBoard(boardId) {
   boardTabs.querySelector(`[data-id="${CSS.escape(boardId)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+function removeBoard(item) {
+  const deletedIndex = boardsCache.findIndex((boardItem) => boardItem.id === item.id);
+  const wasActive = item.id === activeBoardId;
+  const previousActiveBoardId = activeBoardId;
+  const snapshot = store.deleteBoard(item.id);
+  if (!snapshot) return;
+
+  boardsCache = store.getBoards();
+  if (wasActive) {
+    activeBoardId = boardsCache[Math.min(deletedIndex, boardsCache.length - 1)]?.id ?? null;
+    store.setActiveBoardId(activeBoardId);
+    query = '';
+    searchInput.value = '';
+    composingIn = null;
+    lanesCache = null;
+    board.scrollLeft = 0;
+  }
+  renderBoardTabs();
+  if (wasActive) render();
+
+  toast(`Deleted board “${item.title}”`, {
+    label: 'Undo',
+    run: () => {
+      store.restore(snapshot);
+      boardsCache = store.getBoards();
+      activeBoardId = wasActive && boardsCache.some((boardItem) => boardItem.id === item.id)
+        ? item.id
+        : boardsCache.some((boardItem) => boardItem.id === previousActiveBoardId)
+          ? previousActiveBoardId
+          : boardsCache[0]?.id ?? null;
+      store.setActiveBoardId(activeBoardId);
+      query = '';
+      searchInput.value = '';
+      composingIn = null;
+      lanesCache = null;
+      board.scrollLeft = 0;
+      renderBoardTabs();
+      render();
+    },
+  });
+}
+
 function matches(card) {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -152,7 +199,10 @@ function matches(card) {
 }
 
 function emptyState() {
-  return h('p', { class: 'empty', text: 'No lanes yet — add one to get started.' });
+  return h('p', {
+    class: 'empty',
+    text: activeBoardId ? 'No lanes yet — add one to get started.' : 'No boards yet — create one to get started.',
+  });
 }
 
 function renderLane(lane, scrollTop) {
@@ -260,6 +310,7 @@ function startRename(lane) {
 }
 
 function laneMenu(anchor, lane) {
+  const otherBoards = boardsCache.filter((item) => item.id !== activeBoardId);
   menu(anchor, [
     {
       icon: 'top',
@@ -272,12 +323,41 @@ function laneMenu(anchor, lane) {
     },
     { icon: 'pencil', label: 'Rename lane', run: () => startRename(lane) },
     {
+      icon: 'move',
+      label: 'Move to another board',
+      run: () => openLaneBoardMenu(anchor, lane, otherBoards),
+    },
+    {
       icon: 'trash',
       label: 'Delete lane',
       danger: true,
       run: () => undoable(`Deleted “${lane.title}”`, store.deleteLane(activeBoardId, lane.id)),
     },
   ]);
+}
+
+function openLaneBoardMenu(anchor, lane, otherBoards) {
+  if (!otherBoards.length) {
+    toast('Create another board before moving this lane');
+    return;
+  }
+  menu(
+    anchor,
+    otherBoards.map((target) => ({
+      icon: 'move',
+      label: target.title,
+      run: () => {
+        if (!store.moveLaneToBoard(activeBoardId, lane.id, target.id)) return;
+        composingIn = null;
+        lanesCache = null;
+        render();
+        toast(`Moved “${lane.title}” to “${target.title}”`, {
+          label: 'View',
+          run: () => switchBoard(target.id),
+        });
+      },
+    }))
+  );
 }
 
 // --------------------------------------------------------------- composers

@@ -282,7 +282,7 @@ try {
     const openBoardMenu = (id) => document.querySelector(`.board-tab-item[data-id="${id}"] .board-tab-menu`).click();
     const chooseBoardMenu = (label) => [...document.querySelectorAll('.menu button')].find((button) => button.textContent === label).click();
     openBoardMenu(secondBoardId);
-    assert([...document.querySelectorAll('.menu button')].map((button) => button.textContent).join('|') === 'Edit name|Edit color', 'board tab menu has focused name and color actions');
+    assert([...document.querySelectorAll('.menu button')].map((button) => button.textContent).join('|') === 'Edit name|Edit color|Delete board', 'board tab menu has edit and delete actions');
     chooseBoardMenu('Edit name');
     assert(!document.getElementById('board-name-field').hidden && document.getElementById('board-color-field').hidden, 'edit name opens only the name editor');
     const boundaryBoardName = '1234567890123456789012345';
@@ -312,7 +312,27 @@ try {
     document.querySelector(`.board-tab[data-id="${secondBoardId}"]`).click();
     await pause();
     assert(getComputedStyle(document.body).getPropertyValue('--board-color').trim() === editedColor, 'active board color themes the board');
-    results.push('Board creation, editing, colors, tabs, isolation and board-scoped search');
+
+    const laneMenuButton = document.querySelector(`.lane[data-id="${secondLane}"] .lane-header .icon-btn`);
+    laneMenuButton.click();
+    assert([...document.querySelectorAll('.menu button')].some((button) => button.textContent === 'Move to another board'), 'lane menu offers cross-board moves');
+    chooseBoardMenu('Move to another board');
+    assert([...document.querySelectorAll('.menu button')].map((button) => button.textContent).join('|') === 'My board', 'lane move menu lists every other board');
+    chooseBoardMenu('My board');
+    await pause();
+    assert(store.getBoard(secondBoardId).length === 0, 'moved lane leaves its source board');
+    assert(store.getBoard(boardId).some((item) => item.id === secondLane && item.cards[0]?.id === secondCard), 'moved lane keeps all of its cards on the destination board');
+    assert(store.moveLaneToBoard(boardId, secondLane, secondBoardId), 'a moved lane can be moved back');
+    assert(!store.moveLaneToBoard(secondBoardId, secondLane, secondBoardId), 'moving a lane to its current board is rejected');
+
+    openBoardMenu(boardId);
+    chooseBoardMenu('Delete board');
+    await pause();
+    assert(!store.getBoards().some((item) => item.id === boardId) && store.getBoard(boardId).length === 0, 'deleting a board removes its lanes');
+    document.querySelector('#toast-host button').click();
+    await pause();
+    assert(store.getBoards().some((item) => item.id === boardId) && store.getCard(boardId, card)?.attachments.length === 2, 'undo restores a deleted board and its full card tree');
+    results.push('Board creation, editing, deletion, colors, tabs, lane moves, isolation and board-scoped search');
 
 
     await pause(500);
@@ -329,7 +349,10 @@ try {
     assert(writes.length === 2, 'one latest snapshot follows pending write');
     const SQL = await initSqlJs({ locateFile: (file) => 'vendor/' + file });
     const latest = new SQL.Database(writes[1].value);
-    assert(latest.exec('SELECT title FROM cards')[0].values[0][0] === 'write 3', 'latest snapshot contains all edits');
+    const latestCard = latest.prepare('SELECT title FROM cards WHERE id = ?');
+    latestCard.bind([card]);
+    assert(latestCard.step() && latestCard.get()[0] === 'write 3', 'latest snapshot contains all edits');
+    latestCard.free();
     latest.close();
     writes[1].resolve();
     await pause();

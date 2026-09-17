@@ -1,4 +1,4 @@
-import { all, one, run, uid, scheduleSave } from './db.js';
+import { all, one, run, uid, scheduleSave, transaction } from './db.js';
 import { idb } from './idb.js';
 
 const GAP = 1024;
@@ -73,6 +73,52 @@ export function updateBoard(id, { title, color }) {
   ]);
   scheduleSave();
   return true;
+}
+
+/** Deletes a board and its complete foreign-key tree, returning an undo snapshot. */
+export function deleteBoard(id) {
+  const board = one('SELECT * FROM boards WHERE id = ?', [id]);
+  if (!board) return null;
+  const lanes = all('SELECT * FROM lanes WHERE board_id = ?', [id]);
+  const cards = all(
+    'SELECT cards.* FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?',
+    [id]
+  );
+  const snapshot = {
+    kind: 'board',
+    board,
+    lanes,
+    cards,
+    links: all(
+      `SELECT links.* FROM links JOIN cards ON cards.id = links.card_id
+       JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?`,
+      [id]
+    ),
+    attachments: all(
+      `SELECT attachments.* FROM attachments JOIN cards ON cards.id = attachments.card_id
+       JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?`,
+      [id]
+    ),
+  };
+  transaction(() => {
+    run(
+      `DELETE FROM attachments WHERE card_id IN (
+         SELECT cards.id FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?
+       )`,
+      [id]
+    );
+    run(
+      `DELETE FROM links WHERE card_id IN (
+         SELECT cards.id FROM cards JOIN lanes ON lanes.id = cards.lane_id WHERE lanes.board_id = ?
+       )`,
+      [id]
+    );
+    run('DELETE FROM cards WHERE lane_id IN (SELECT id FROM lanes WHERE board_id = ?)', [id]);
+    run('DELETE FROM lanes WHERE board_id = ?', [id]);
+    run('DELETE FROM boards WHERE id = ?', [id]);
+  });
+  scheduleSave();
+  return snapshot;
 }
 
 export function getActiveBoardId(boards = getBoards()) {
@@ -187,6 +233,23 @@ export function moveLane(boardId, id, beforeId, afterId) {
   scheduleSave();
 }
 
+/** Moves a lane (and therefore its full card tree) to the end of another board. */
+export function moveLaneToBoard(boardId, id, targetBoardId) {
+  if (boardId === targetBoardId) return false;
+  const lane = one('SELECT id FROM lanes WHERE id = ? AND board_id = ?', [id, boardId]);
+  const target = one('SELECT id FROM boards WHERE id = ?', [targetBoardId]);
+  if (!lane || !target) return false;
+  const last = one('SELECT MAX(position) AS p FROM lanes WHERE board_id = ?', [targetBoardId]);
+  run('UPDATE lanes SET board_id = ?, position = ? WHERE id = ? AND board_id = ?', [
+    targetBoardId,
+    positionBetween(last?.p ?? null, null),
+    id,
+    boardId,
+  ]);
+  scheduleSave();
+  return true;
+}
+
 /** Deletes a lane and its cards, returning a snapshot that `restore` can replay. */
 export function deleteLane(boardId, id) {
   const lane = one('SELECT * FROM lanes WHERE id = ? AND board_id = ?', [id, boardId]);
@@ -293,9 +356,28 @@ export function deleteCard(boardId, id) {
   return snapshot;
 }
 
-/** Re-inserts rows captured by deleteCard/deleteLane. Blobs are never deleted eagerly, so files survive. */
+/** Re-inserts rows captured by deleteCard/deleteLane/deleteBoard. Blobs are never deleted eagerly, so files survive. */
 export function restore(snapshot) {
   if (!snapshot) return;
+  if (snapshot.board) {
+    const b = snapshot.board;
+    run('INSERT OR REPLACE INTO boards (id, title, color, position, created_at) VALUES (?, ?, ?, ?, ?)', [
+      b.id,
+      b.title,
+      b.color,
+      b.position,
+      b.created_at,
+    ]);
+  }
+  for (const l of snapshot.lanes ?? []) {
+    run('INSERT OR REPLACE INTO lanes (id, board_id, title, position, created_at) VALUES (?, ?, ?, ?, ?)', [
+      l.id,
+      l.board_id,
+      l.title,
+      l.position,
+      l.created_at,
+    ]);
+  }
   if (snapshot.lane) {
     const l = snapshot.lane;
     run('INSERT OR REPLACE INTO lanes (id, board_id, title, position, created_at) VALUES (?, ?, ?, ?, ?)', [
